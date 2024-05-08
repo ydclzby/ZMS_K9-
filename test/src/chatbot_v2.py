@@ -8,7 +8,7 @@ from playsound import playsound
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 import pyttsx3
-
+import threading
 
 itunes_search_url = "https://itunes.apple.com/search"
 # Initialize the recognizer
@@ -19,6 +19,9 @@ assistant_id = '7d57aa96-2f2f-472a-8427-85181a6f5768'
 news_api_key = 'a0ff4132-cf60-48d7-b23f-d0523e7c67aa' 
 news_endpoint = 'https://content.guardianapis.com/search'
 
+wait_command = False
+command_text = ""
+lock = threading.Lock()
 
 def get_news(topic):
     #get news url
@@ -125,7 +128,7 @@ def first_podcast(topic):
                 episode_name = os.path.basename(parsed_url.path)
                 
                 # Download the episode to a local file
-                local_filename = "../data/" + episode_name
+                local_filename = "../data/podcast.m4a"
                 print(f"Downloading to {local_filename}...")
                 response = requests.get(first_episode_url, stream=True)
                 
@@ -142,8 +145,10 @@ def first_podcast(topic):
     else:
         print(f"Error fetching data: {response.status_code}")
 
+def chatbot_thread():
+    global wait_command
+    global command_text
 
-def main():
     # Set up the authenticator and assistant
     authenticator = IAMAuthenticator(api_key)
     assistant = AssistantV2(
@@ -158,50 +163,48 @@ def main():
         session_id = response['session_id']
 
         while True:
-            # Get input from the user
-#             recognizer = sr.Recognizer()
+            if(wait_command == False):
+                #user_input = input('u:')
+                user_input = command_text
+                if user_input.lower() == 'quit':
+                    break
 
-# # Use a microphone to capture audio
-#             with sr.Microphone() as mic:
-#                 # Adjust for ambient noise
-#                 recognizer.adjust_for_ambient_noise(mic)
+                # Send a message to the chatbot
+                message_input = {
+                    'message_type': 'text',
+                    'text': user_input
+                }
 
-#                 print("Listening for 5 seconds...")
+                response = assistant.message(
+                    assistant_id=assistant_id,
+                    session_id=session_id,
+                    input=message_input
+                ).get_result()
 
-#                 # Listen for 5 seconds
-#                 audio_data = recognizer.listen(mic, timeout=5, phrase_time_limit=5)
-                
-#             recognized_text = recognizer.recognize_google(audio_data)
+                # Print the chatbot's response
+                if response['output']['generic']:
+                    response_str = response['output']['generic'][0]['text']
+                    #print("Assistant:", response['output']['generic'][0]['text'])
+                    if response_str[1] == '0':
+                        print(response_str[5:])
+                        engine = pyttsx3.init()
+                        voices = engine.getProperty('voices')  # Get available voices
+                        engine.setProperty('voice', voices[14].id)  # Choose a voice male:14 female:66
+                        engine.setProperty('rate', 150)  # Speed of speech
+                        engine.setProperty('volume', 1)  # Volume (0 to 1)
+                        engine.say(response_str[5:])
+                        engine.runAndWait()
+                    elif response_str[1] == '1':
+                        first_podcast(response_str[5:])
+                    elif response_str[1] == '2':
+                        get_news(response_str[5:])
+                        read_news()
+                else:
+                    print("Assistant: No response generated.")
 
-            user_input = input('u:')
-            if user_input.lower() == 'quit':
-                break
+                with lock:
+                    wait_command = not wait_command
 
-            # Send a message to the chatbot
-            message_input = {
-                'message_type': 'text',
-                'text': user_input
-            }
-
-            response = assistant.message(
-                assistant_id=assistant_id,
-                session_id=session_id,
-                input=message_input
-            ).get_result()
-
-            # Print the chatbot's response
-            if response['output']['generic']:
-                response_str = response['output']['generic'][0]['text']
-                #print("Assistant:", response['output']['generic'][0]['text'])
-                if response_str[1] == '0':
-                    print(response_str[5:])
-                elif response_str[1] == '1':
-                    first_podcast(response_str[5:])
-                elif response_str[1] == '2':
-                    get_news(response_str[5:])
-                    read_news()
-            else:
-                print("Assistant: No response generated.")
 
     except Exception as e:
         print(f"An error occurred: {e}")
@@ -210,6 +213,43 @@ def main():
         # Always try to close the session
         if 'session_id' in locals():  # Check if session was created
             assistant.delete_session(assistant_id=assistant_id, session_id=session_id)
+
+def listening_thread():
+    global wait_command
+    global command_text
+
+    # Initialize the recognizer
+    recognizer = sr.Recognizer()
+    while(True):
+        # Use a microphone to capture audio
+        if(wait_command == True):
+            with sr.Microphone() as mic:
+                # Adjust for ambient noise
+                recognizer.adjust_for_ambient_noise(mic)
+
+                print("Listening...")
+
+                audio_data = recognizer.listen(mic, timeout=5, phrase_time_limit=3)
+
+                # Recognize the speech and save it to a text file
+                try:
+                    # Recognize speech using Google Speech-to-Text
+                    recognized_text = recognizer.recognize_google(audio_data)
+                    print("You said:", recognized_text)
+
+                    with lock:
+                        command_text = recognized_text
+
+                except sr.UnknownValueError:
+                    print("Could not understand the audio.")
+                except sr.RequestError as e:
+                    print(f"Error with the speech recognition service; {e}")
+            with lock:
+                wait_command = not wait_command
+
+def main():
+    threading.Thread(target=chatbot_thread).start()
+    threading.Thread(target=listening_thread).start()
 
 if __name__ == "__main__":
     main()
