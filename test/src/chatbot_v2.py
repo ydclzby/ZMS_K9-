@@ -10,12 +10,13 @@ from bs4 import BeautifulSoup
 import pyttsx3
 import threading
 
+# podcast api
 itunes_search_url = "https://itunes.apple.com/search"
-# Initialize the recognizer
+# chatbot api
 api_key = 'pi8pPj2tKQ21SjXaWZhRH5QJHemD1VUh9OCNk4_mxZll'
 service_url = 'https://api.us-south.assistant.watson.cloud.ibm.com/instances/331ce7d9-5f6f-4f18-ae44-6418b93a1753'
 assistant_id = '7d57aa96-2f2f-472a-8427-85181a6f5768'
-
+# news api
 news_api_key = 'a0ff4132-cf60-48d7-b23f-d0523e7c67aa' 
 news_endpoint = 'https://content.guardianapis.com/search'
 
