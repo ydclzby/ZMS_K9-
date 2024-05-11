@@ -31,16 +31,15 @@ news_endpoint = 'https://content.guardianapis.com/search'
 #{4} ---> for music
 #{5} ---> control command(stop, continue and quit)
 
-
+threading_lock = threading.Lock()
 wait_command = True
 command_text = ""
 control_command = "none"
-threading_lock = threading.Lock()
 mode = ""
 topic = ""
 
 #podcast
-history_file = "../data/history/playback_history.json"
+history_file = "playback_history.json"
 player = None
 paused = False
 quit_playback = False
@@ -266,6 +265,16 @@ def read_news():
     engine.say(news_text)
     engine.runAndWait()
 
+def read_text(text_to_speak):
+    engine = pyttsx3.init()
+    voices = engine.getProperty('voices')  # Get available voices
+    engine.setProperty('voice', voices[14].id)  # Choose a voice male:14 female:66
+    engine.setProperty('rate', 150)  # Speed of speech
+    engine.setProperty('volume', 1)  # Volume (0 to 1)
+    engine.say("hello")
+    engine.runAndWait()
+    print("finished----------")
+
 #music
 
 #threadings
@@ -317,6 +326,10 @@ def chatbot_thread():
                         print("unknown command")
                     elif response_str[1] == '1': #plain text
                         print(response_str[5:])
+                        print("mode set to 1 need to speak")
+                        with threading_lock:
+                            mode = "1"
+                            topic = response_str[5:]
                     elif response_str[1] == '2': #podcast
                         if response_str[5:] == "continue_podcast":
                             print("continue_podcast")
@@ -359,16 +372,17 @@ def listening_thread():
     # Initialize the recognizer
     recognizer = sr.Recognizer()
     with sr.Microphone() as mic:
-        recognizer.adjust_for_ambient_noise(mic)
+        #recognizer.adjust_for_ambient_noise(mic)
         while(True):
                 print("Listening...")
 
-                audio_data = recognizer.listen(mic, timeout=3, phrase_time_limit=3)
+                #audio_data = recognizer.listen(mic, timeout=3, phrase_time_limit=3)
 
                 # Recognize the speech and save it to a text file
                 try:
                     # Recognize speech using Google Speech-to-Text
-                    recognized_text = recognizer.recognize_google(audio_data)
+                    #recognized_text = recognizer.recognize_google(audio_data)
+                    recognized_text = input("you:")
                     print("You said:", recognized_text)
 
                     #key word detection
@@ -397,6 +411,10 @@ def speaking_thread():
     while True:
         if mode == "0":
             pass
+        elif mode == "1":
+            print("--------------------------------start")
+            read_text(topic)
+            print("--------------------------------finish")
         elif mode == "2.1":
             episode_to_resume = list_history(history)
             resume_playback(episode_to_resume)
@@ -406,6 +424,8 @@ def speaking_thread():
             pass
         with threading_lock:
             mode = "0"
+
+
 
 def main():
     threading.Thread(target=chatbot_thread).start()
