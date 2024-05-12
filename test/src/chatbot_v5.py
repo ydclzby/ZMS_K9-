@@ -13,6 +13,7 @@ import vlc
 import time
 import json
 import queue
+from gtts import gTTS
 
 # podcast api
 itunes_search_url = "https://itunes.apple.com/search"
@@ -64,6 +65,20 @@ ibm_Chatbot = ChatbotState(history_file)
 # current_start_time = None
 podcast_lock = threading.Lock()
 # history = []  # This will now store only a single episode
+
+def read_text(text_to_speak): 
+    # Create a gTTS object
+    tts = gTTS(text=text_to_speak, lang='en')
+    
+    # Save the speech as a temporary file
+    tts_file = "temp_speech.mp3"
+    tts.save(tts_file)
+    
+    # Play the speech using playsound
+    playsound(tts_file)
+    
+    # Delete the temporary file
+    os.remove(tts_file)
 
 def read_history_from_json(file_path):
     """Read playback history from a JSON file."""
@@ -200,20 +215,9 @@ def first_podcast(topic):
     else:
         print(f"Error fetching data: {response.status_code}")
 
-def play_podcast(topic):
-    global history, history_file
-    history = read_history_from_json(history_file)
-    print("Do you want to resume palyback from the history?")
-    choice = "yes"
-    if choice == "yes":
-        episode_to_resume = list_history(history)
-        resume_playback(episode_to_resume)
-    else:
-        topic = input("Enter the podcast topic to search for: ").strip()#should change
-        first_podcast(topic)
-
 #news
 def get_news(topic):
+    global control_command
     #get news url
     params = {
         'api-key': news_api_key,
@@ -261,27 +265,11 @@ def get_news(topic):
             with open("../data/news_content.txt", 'a') as file:
                 file.write('\n' + p.get_text())
             print(p.get_text())
+            if control_command == "stop" or control_command == "quit":
+                break
+            read_text(p.get_text())
     else:
         print('Failed to fetch the article content. Status Code:', response.status_code)
-
-def read_news():
-    with open("../data/news_content.txt", "r") as file:
-        news_text = file.read()
-
-    # # Convert the text to speech
-    # tts = gTTS(text=news_text, lang="en")
-    # output_file = "../data/news_sound.mp3"
-    # tts.save(output_file)
-
-    # playsound('../data/news_sound.mp3')
-        
-    engine = pyttsx3.init()
-    voices = engine.getProperty('voices')  # Get available voices
-    engine.setProperty('voice', voices[14].id)  # Choose a voice male:14 female:66
-    engine.setProperty('rate', 150)  # Speed of speech
-    engine.setProperty('volume', 1)  # Volume (0 to 1)
-    engine.say(news_text)
-    engine.runAndWait()
 
 #music
 
@@ -334,6 +322,9 @@ def chatbot_thread():
                         print("unknown command")
                     elif response_str[1] == '1': #plain text
                         print(response_str[5:])
+                        with threading_lock:
+                            ibm_Chatbot.mode = "1"
+                            ibm_Chatbot.topic = response_str[5:]
                     elif response_str[1] == '2': #podcast
                         if response_str[5:] == "continue_podcast":
                             print("continue_podcast")
@@ -345,7 +336,9 @@ def chatbot_thread():
                                 ibm_Chatbot.mode = "2.2"
                                 ibm_Chatbot.topic = response_str[5:]
                     elif response_str[1] == '3': #news
-                        pass
+                        with threading_lock:
+                            ibm_Chatbot.mode = "3"
+                            ibm_Chatbot.topic = response_str[5:]
                     elif response_str[1] == '4': #music
                         pass
                     elif response_str[1] == '5': #control
@@ -398,7 +391,6 @@ def listening_thread():
                         with threading_lock:
                             ibm_Chatbot.command_text = recognized_text
                             ibm_Chatbot.wait_command = False
-                        print(wait_command)
 
                 except sr.UnknownValueError:
                     print("Could not understand the audio.")
@@ -420,9 +412,6 @@ def audio_thread(audio_queue):
                 
                 
 def recognize_thread(audio_queue):
-    # global wait_command
-    # global command_text
-    
     recognizer = sr.Recognizer()
     while True:
         if not audio_queue.empty():
@@ -456,12 +445,16 @@ def speaking_thread():
     while True:
         if ibm_Chatbot.mode == "0":
             pass
+        elif ibm_Chatbot.mode == "1":
+            read_text(ibm_Chatbot.topic)
         elif ibm_Chatbot.mode == "2.1":
             ibm_Chatbot.history = read_history_from_json(history_file)
             episode_to_resume = list_history(ibm_Chatbot.history)
             resume_playback(episode_to_resume)
         elif ibm_Chatbot.mode == "2.2":
             first_podcast(ibm_Chatbot.topic)
+        elif ibm_Chatbot.mode == "3":
+            get_news(ibm_Chatbot.topic)
         else:
             pass
         with threading_lock:

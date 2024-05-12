@@ -12,6 +12,7 @@ import threading
 import vlc
 import time
 import json
+from gtts import gTTS
 
 # podcast api
 itunes_search_url = "https://itunes.apple.com/search"
@@ -37,6 +38,7 @@ command_text = ""
 control_command = "none"
 mode = ""
 topic = ""
+chatbot_thread_started = False
 
 #podcast
 history_file = "playback_history.json"
@@ -196,6 +198,7 @@ def play_podcast(topic):
 
 #news
 def get_news(topic):
+    global control_command
     #get news url
     params = {
         'api-key': news_api_key,
@@ -243,37 +246,25 @@ def get_news(topic):
             with open("../data/news_content.txt", 'a') as file:
                 file.write('\n' + p.get_text())
             print(p.get_text())
+            if control_command == "stop" or control_command == "quit":
+                break
+            read_text(p.get_text())
     else:
         print('Failed to fetch the article content. Status Code:', response.status_code)
 
-def read_news():
-    with open("../data/news_content.txt", "r") as file:
-        news_text = file.read()
-
-    # # Convert the text to speech
-    # tts = gTTS(text=news_text, lang="en")
-    # output_file = "../data/news_sound.mp3"
-    # tts.save(output_file)
-
-    # playsound('../data/news_sound.mp3')
-        
-    engine = pyttsx3.init()
-    voices = engine.getProperty('voices')  # Get available voices
-    engine.setProperty('voice', voices[14].id)  # Choose a voice male:14 female:66
-    engine.setProperty('rate', 150)  # Speed of speech
-    engine.setProperty('volume', 1)  # Volume (0 to 1)
-    engine.say(news_text)
-    engine.runAndWait()
-
-def read_text(text_to_speak):
-    engine = pyttsx3.init()
-    voices = engine.getProperty('voices')  # Get available voices
-    engine.setProperty('voice', voices[14].id)  # Choose a voice male:14 female:66
-    engine.setProperty('rate', 150)  # Speed of speech
-    engine.setProperty('volume', 1)  # Volume (0 to 1)
-    engine.say("hello")
-    engine.runAndWait()
-    print("finished----------")
+def read_text(text_to_speak): 
+    # Create a gTTS object
+    tts = gTTS(text=text_to_speak, lang='en')
+    
+    # Save the speech as a temporary file
+    tts_file = "temp_speech.mp3"
+    tts.save(tts_file)
+    
+    # Play the speech using playsound
+    playsound(tts_file)
+    
+    # Delete the temporary file
+    os.remove(tts_file)
 
 #music
 
@@ -286,6 +277,11 @@ def chatbot_thread():
     global control_command
     global mode
     global topic
+    global chatbot_thread_started
+    if chatbot_thread_started:
+        print("Chatbot thread is already running.")
+        return
+    chatbot_thread_started = True
 
     # Set up the authenticator and assistant
     authenticator = IAMAuthenticator(api_key)
@@ -302,7 +298,6 @@ def chatbot_thread():
 
         while True:
             if(wait_command == False):
-                print("chatbot----")
                 #user_input = input('u:')
                 user_input = command_text
                 print("user input is:",user_input)
@@ -326,7 +321,7 @@ def chatbot_thread():
                         print("unknown command")
                     elif response_str[1] == '1': #plain text
                         print(response_str[5:])
-                        print("mode set to 1 need to speak")
+                        #read_text(response_str[5:])
                         with threading_lock:
                             mode = "1"
                             topic = response_str[5:]
@@ -341,7 +336,9 @@ def chatbot_thread():
                                 mode = "2.2"
                                 topic = response_str[5:]
                     elif response_str[1] == '3': #news
-                        pass
+                        with threading_lock:
+                                mode = "3"
+                                topic = response_str[5:]
                     elif response_str[1] == '4': #music
                         pass
                     elif response_str[1] == '5': #control
@@ -412,14 +409,14 @@ def speaking_thread():
         if mode == "0":
             pass
         elif mode == "1":
-            print("--------------------------------start")
             read_text(topic)
-            print("--------------------------------finish")
         elif mode == "2.1":
             episode_to_resume = list_history(history)
             resume_playback(episode_to_resume)
         elif mode == "2.2":
             first_podcast(topic)
+        elif mode == "3":
+            get_news(topic)
         else:
             pass
         with threading_lock:
