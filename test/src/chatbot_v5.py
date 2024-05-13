@@ -14,6 +14,9 @@ import time
 import json
 import queue
 from gtts import gTTS
+from datetime import datetime
+import noisereduce as nr
+import numpy as np
 
 # podcast api
 itunes_search_url = "https://itunes.apple.com/search"
@@ -37,7 +40,7 @@ class ChatbotState(object):
     def __init__(self, history_file):
         self.history_file = history_file
         self.wait_command = True
-        self.command_test = ""
+        self.command_text = ""
         self.control_command = "none"
         self.mode = ""
         self.topic = ""
@@ -49,22 +52,20 @@ class ChatbotState(object):
         self.history = []
 
 
-# wait_command = True
-# command_text = ""
-# control_command = "none"
+
 threading_lock = threading.Lock()
-# mode = ""
-# topic = ""
+
 
 #podcast
 history_file = "../data/history/playback_history.json"
 ibm_Chatbot = ChatbotState(history_file)
-# player = None
-# paused = False
-# quit_playback = False
-# current_start_time = None
+
 podcast_lock = threading.Lock()
-# history = []  # This will now store only a single episode
+
+def reduce_noise(audio_data):
+    # Assuming 'audio_data' is a numpy array containing the audio waveform
+    reduced_data = nr.reduce_noise(y=audio_data, sr=16000)
+    return reduced_data
 
 def read_text(text_to_speak): 
     # Create a gTTS object
@@ -155,7 +156,7 @@ def control_playback(episode):
                 ibm_Chatbot.current_start_time = time.time()
             elif command == "quit":
                 print("Quitting playback and updating history...")
-                quit_playback = True
+                ibm_Chatbot.quit_playback = True
                 if ibm_Chatbot.player:
                     ibm_Chatbot.player.stop()
                 # Update the final duration listened
@@ -265,7 +266,7 @@ def get_news(topic):
             with open("../data/news_content.txt", 'a') as file:
                 file.write('\n' + p.get_text())
             print(p.get_text())
-            if control_command == "stop" or control_command == "quit":
+            if ibm_Chatbot.control_command == "stop" or ibm_Chatbot.control_command == "quit":
                 break
             read_text(p.get_text())
     else:
@@ -276,13 +277,6 @@ def get_news(topic):
 #threadings
 #thread for communication with chatbot
 def chatbot_thread():
-    # global wait_command
-    # global command_text
-    # global history
-    # global control_command
-    # global mode
-    # global topic
-
     # Set up the authenticator and assistant
     authenticator = IAMAuthenticator(api_key)
     assistant = AssistantV2(
@@ -416,7 +410,11 @@ def recognize_thread(audio_queue):
     while True:
         if not audio_queue.empty():
             audio = audio_queue.get()
+
             try:
+                # raw_data = audio.get_wav_data()
+                # np_data = np.frombuffer(raw_data, dtype=np.int16)
+                # clean_data = reduce_noise(np_data)
                 recognized_text = recognizer.recognize_google(audio)
                 print("You said:", recognized_text)
                 
@@ -436,12 +434,7 @@ def recognize_thread(audio_queue):
                 print(f"Could not request results from Google Speech Recognition service; {e}")
 
 #thread for controlling speaker
-def speaking_thread():
-    # global control_command
-    # global mode
-    # global topic
-    # global history
-    
+def speaking_thread():    
     while True:
         if ibm_Chatbot.mode == "0":
             pass
