@@ -33,6 +33,10 @@ podcast_lock = threading.Lock()
 
 podcast_history_fp = "../data/history/playback_history.json"
 
+api_url = "https://api.jamendo.com/v3.0/tracks"
+
+CLIENT_ID = 'cd92fac2'
+
 # class
 
 # Podcast Class
@@ -162,11 +166,12 @@ class PodcastPlayer(object):
                    
     def update_control_command(self, new_command):
         self.control_command = new_command             
+
 # News Class
 class NewsPlayer(object):
     def __init__(self):
         self.control_command = None
-        
+          
     def get_news(self, topic):
         #get news url
         params = {
@@ -236,13 +241,56 @@ class NewsPlayer(object):
 
     def update_control_command(self, new_command):
         self.control_command = new_command 
+
 # Music Class
+class MusicPlayer(object):
+    def __init__(self):
+        self.control_command = None
+        self.player = None
+        self.paused_arg = False
+        self.quit_arg = False
+        
+    def get_song(self, topic):
+        params = {
+            'client_id': CLIENT_ID,
+            'format': 'json',
+            'limit': 1,  # Get only the top result
+            'tags': topic,
+            'order': 'popularity_total_desc'
+        }
+        
+        try:
+            response = requests.get(api_url, params=params)
+            response.raise_for_status()  # Raises an exception for HTTP error responses
+            
+            # Parse the JSON response
+            data = response.json()
+            
+            # Check if any tracks were found
+            if data['headers']['status'] == 'success' and data['results']:
+                track = data['results'][0]
+                # return track['name'], track['artist_name'], track['audio']
+                instance = vlc.Instance()
+                self.player = instance.media_player_new()
+                media = instance.media_new(track['audio'])
+                
+                self.player.set_media(media)
+                self.player.audio_set_volume(100)
+                print("Streaming music")
+                self.player.play()
+            else:
+                return "No jazz tracks found.", None, None
+        except requests.RequestException as e:
+            return f"An error occurred: {str(e)}", None, None 
+        
+        
 
 # SysState Class
 class SysState(object):
     def __init__(self):
         self.podcastPlayer = PodcastPlayer(podcast_history_fp)
         self.newsPlayer = NewsPlayer()
+        self.musicPlayer = MusicPlayer()
         self.mode = None
         self.wait_command = True
         self.command_text = ""
@@ -250,6 +298,7 @@ class SysState(object):
         self.topic = ""
         self.control_command = "none"
         self.audio_queue = queue.Queue()
+        self.mic = True
         
     def chatbot_thread(self):
         # Set up the authenticator and assistant
@@ -298,29 +347,44 @@ class SysState(object):
                                 self.mode = "1"
                                 self.topic = response_content
                         elif response_label == '2': #podcast
+                            self.mic = True
                             if response_content == "continue_podcast":
                                 print("continue_podcast")
+                                
                                 with threading_lock:
                                     self.mode = "2.1"
+                                print('out of lock')
                             else:
+                                
                                 print("new_podcast")
                                 with threading_lock:
                                     self.mode = "2.2"
                                     self.topic = response_content
                         elif response_label == '3': #news
+                            self.mic = True
                             with threading_lock:
                                 self.mode = "3"
                                 self.topic = response_content
                         elif response_label == '4': #music
-                            pass
+                            self.mic = True
+                            with threading_lock:
+                                self.mode = "4"
+                                self.topic = response_content
                         elif response_label == '5': #control
+                            self.mic = True
                             print("control command")
                             print(response_content)
                             with threading_lock:
+                                self.mode = "5"
                                 self.control_command = response_content
                                 self.podcastPlayer.update_control_command(self.control_command)
                                 self.newsPlayer.update_control_command(self.control_command)
-                        
+                        elif response_label == '6':
+                            self.mic = True
+                            print(response_content)
+                            with threading_lock:
+                                self.mode = "6"
+                            print('out of lock')
                         with threading_lock:
                             self.wait_command = True
                     else:
@@ -343,8 +407,23 @@ class SysState(object):
             print("Ready to receive audio...")
             while True:
                 try:
-                    audio = recognizer.listen(source, timeout=30.0, phrase_time_limit=5.0)
-                    self.audio_queue.put(audio)
+                    if self.mic == False:
+                        continue
+                    else:
+                        print('mic on')
+                        audio = recognizer.listen(source, timeout=5.0, phrase_time_limit=5.0)
+                        
+                        recognized_text = recognizer.recognize_google(audio)
+                        print("You said:", recognized_text)
+                        #recognized_text = input('user:')
+                        keywords = {"stop", "continue", "quit", "name"}
+                        detected_keywords = [kw for kw in keywords if kw in recognized_text.lower()]
+                        if detected_keywords:
+                            print("keyword detected")
+                        self.command_text = recognized_text
+                        self.wait_command = False
+                        self.mic = False
+                        print('mic off')
                 except Exception as e:
                     print(f"Error capturing audio: {e}")
 
@@ -379,20 +458,27 @@ class SysState(object):
 
     def mode_thread(self):    
         while True:
+
             if self.mode == "0":
                 pass
             elif self.mode == "1":
                 self.newsPlayer.read_text(self.topic)
+                self.mic = True
             elif self.mode == "2.1":
                 self.podcastPlayer.play_history()
             elif self.mode == "2.2":
                 self.podcastPlayer.first_podcast(self.topic)
             elif self.mode == "3":
                 self.newsPlayer.get_news(self.topic)
+            elif self.mode == "4":
+                self.musicPlayer.get_song(self.topic)
+        
             else:
                 pass
+            
             with threading_lock:
                 self.mode = "0"
+
 
 #chatbot response
 #{0} ---> response for unknown command
@@ -407,8 +493,8 @@ def main():
     
     threading.Thread(target=ibm_Chatbot.chatbot_thread).start()
     #threading.Thread(target=listening_thread).start()
-    threading.Thread(target=ibm_Chatbot.audio_thread, daemon=True).start()
-    threading.Thread(target=ibm_Chatbot.recognize_thread, daemon=True).start()
+    threading.Thread(target=ibm_Chatbot.audio_thread).start()
+    #threading.Thread(target=ibm_Chatbot.recognize_thread, daemon=True).start()
     threading.Thread(target=ibm_Chatbot.mode_thread).start()
 
 
