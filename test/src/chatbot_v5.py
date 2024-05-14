@@ -15,8 +15,8 @@ import json
 import queue
 from gtts import gTTS
 from datetime import datetime
-import noisereduce as nr
 import numpy as np
+import time
 
 # podcast api
 itunes_search_url = "https://itunes.apple.com/search"
@@ -44,6 +44,7 @@ class ChatbotState(object):
         self.control_command = "none"
         self.mode = ""
         self.topic = ""
+        self.is_speaking = False
         
         self.player = None
         self.paused = False
@@ -62,22 +63,26 @@ ibm_Chatbot = ChatbotState(history_file)
 
 podcast_lock = threading.Lock()
 
+def clean_queue(q):
+    while not q.empty():
+        q.get_nowait()
+
 def reduce_noise(audio_data):
     # Assuming 'audio_data' is a numpy array containing the audio waveform
     reduced_data = nr.reduce_noise(y=audio_data, sr=16000)
     return reduced_data
 
 def read_text(text_to_speak): 
+    ibm_Chatbot.is_speaking = True
     # Create a gTTS object
     tts = gTTS(text=text_to_speak, lang='en')
-    
     # Save the speech as a temporary file
     tts_file = "temp_speech.mp3"
     tts.save(tts_file)
     
     # Play the speech using playsound
     playsound(tts_file)
-    
+
     # Delete the temporary file
     os.remove(tts_file)
 
@@ -311,16 +316,20 @@ def chatbot_thread():
                 # Print the chatbot's response
                 if response['output']['generic']:
                     response_str = response['output']['generic'][0]['text']
-                    #print("Assistant:", response['output']['generic'][0]['text'])
-                    if response_str[1] == '0': #unknown commands
+                    response_label = response['output']['generic'][-1]['text'][1]
+                    response_content = ""
+                    for message in response['output']['generic']:
+                        response_content += message['text'][5:]
+
+                    if response_label == '0': #unknown commands
                         print("unknown command")
-                    elif response_str[1] == '1': #plain text
-                        print(response_str[5:])
+                    elif response_label == '1': #plain text
+                        print(response_content)
                         with threading_lock:
                             ibm_Chatbot.mode = "1"
-                            ibm_Chatbot.topic = response_str[5:]
-                    elif response_str[1] == '2': #podcast
-                        if response_str[5:] == "continue_podcast":
+                            ibm_Chatbot.topic = response_content
+                    elif response_label == '2': #podcast
+                        if response_content == "continue_podcast":
                             print("continue_podcast")
                             with threading_lock:
                                 ibm_Chatbot.mode = "2.1"
@@ -328,21 +337,22 @@ def chatbot_thread():
                             print("new_podcast")
                             with threading_lock:
                                 ibm_Chatbot.mode = "2.2"
-                                ibm_Chatbot.topic = response_str[5:]
-                    elif response_str[1] == '3': #news
+                                ibm_Chatbot.topic = response_content
+                    elif response_label == '3': #news
                         with threading_lock:
                             ibm_Chatbot.mode = "3"
-                            ibm_Chatbot.topic = response_str[5:]
-                    elif response_str[1] == '4': #music
+                            ibm_Chatbot.topic = response_content
+                    elif response_label == '4': #music
                         pass
-                    elif response_str[1] == '5': #control
+                    elif response_label == '5': #control
                         print("control command")
-                        print(response_str[5:])
+                        print(response_content)
                         with threading_lock:
-                            ibm_Chatbot.control_command = response_str[5:]
+                            ibm_Chatbot.control_command = response_content
                     
                     with threading_lock:
                         ibm_Chatbot.wait_command = True
+
                 else:
                     print("Assistant: No response generated.")
 
@@ -367,7 +377,7 @@ def listening_thread():
         while(True):
                 print("Listening...")
 
-                audio_data = recognizer.listen(mic, timeout=3, phrase_time_limit=3)
+                audio_data = recognizer.listen(mic, timeout=10, phrase_time_limit=3)
 
                 # Recognize the speech and save it to a text file
                 try:
@@ -399,7 +409,12 @@ def audio_thread(audio_queue):
         print("Ready to receive audio...")
         while True:
             try:
-                audio = recognizer.listen(source, timeout=5.0, phrase_time_limit=5.0)
+                if ibm_Chatbot.is_speaking == True:
+                    print("start sleeping----------------")
+                    time.sleep(3)
+                    #clean_queue(audio_queue)
+                    ibm_Chatbot.is_speaking = False
+                audio = recognizer.listen(source, timeout=70.0, phrase_time_limit=3.0)
                 audio_queue.put(audio)
             except Exception as e:
                 print(f"Error capturing audio: {e}")
@@ -409,8 +424,10 @@ def recognize_thread(audio_queue):
     recognizer = sr.Recognizer()
     while True:
         if not audio_queue.empty():
-            audio = audio_queue.get()
+            print("Queue length:", audio_queue.qsize())
 
+            audio = audio_queue.get()
+            #clean_queue(audio_queue)
             try:
                 # raw_data = audio.get_wav_data()
                 # np_data = np.frombuffer(raw_data, dtype=np.int16)
@@ -434,12 +451,13 @@ def recognize_thread(audio_queue):
                 print(f"Could not request results from Google Speech Recognition service; {e}")
 
 #thread for controlling speaker
-def speaking_thread():    
+def speaking_thread(audio_queue):    
     while True:
         if ibm_Chatbot.mode == "0":
             pass
         elif ibm_Chatbot.mode == "1":
             read_text(ibm_Chatbot.topic)
+            clean_queue(audio_queue)
         elif ibm_Chatbot.mode == "2.1":
             ibm_Chatbot.history = read_history_from_json(history_file)
             episode_to_resume = list_history(ibm_Chatbot.history)
@@ -459,7 +477,7 @@ def main():
     #threading.Thread(target=listening_thread).start()
     threading.Thread(target=audio_thread, args=(audio_queue,), daemon=True).start()
     threading.Thread(target=recognize_thread, args=(audio_queue,), daemon=True).start()
-    threading.Thread(target=speaking_thread).start()
+    threading.Thread(target=speaking_thread, args=(audio_queue,), daemon=False).start()
 
 if __name__ == "__main__":
     main()

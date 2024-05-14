@@ -12,7 +12,7 @@ assistant = AssistantV2(
     authenticator=authenticator
 )
 
-print("assistance created")
+print("Assistant created")
 
 # Set the service URL
 assistant.set_service_url(service_url)
@@ -21,7 +21,7 @@ assistant.set_service_url(service_url)
 response = assistant.create_session(assistant_id=assistant_id).get_result()
 session_id = response['session_id']
 
-print(session_id)
+print("Session ID:", session_id)
 
 # Send a message to the chatbot
 while True:
@@ -37,10 +37,9 @@ while True:
         input=message_input
     ).get_result()
 
-    # Print the chatbot's response
-    print(response['output']['generic'][0]['text'])
-
-
+    # Print each message from the chatbot's response
+    for message in response['output']['generic']:
+        print(message['text'])
 
 # Close the session
 assistant.delete_session(assistant_id=assistant_id, session_id=session_id)
