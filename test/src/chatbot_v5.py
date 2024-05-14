@@ -44,7 +44,6 @@ class ChatbotState(object):
         self.control_command = "none"
         self.mode = ""
         self.topic = ""
-        self.is_speaking = False
         
         self.player = None
         self.paused = False
@@ -73,7 +72,6 @@ def reduce_noise(audio_data):
     return reduced_data
 
 def read_text(text_to_speak): 
-    ibm_Chatbot.is_speaking = True
     # Create a gTTS object
     tts = gTTS(text=text_to_speak, lang='en')
     # Save the speech as a temporary file
@@ -109,7 +107,7 @@ def list_history(history):
 
     # We assume a single entry in the history file
     episode = history[0]
-    print(f"1. {episode['title']}")
+    # print(f"1. {episode['title']}")
     return episode
 
 def resume_playback(episode):
@@ -365,42 +363,6 @@ def chatbot_thread():
         if 'session_id' in locals():  # Check if session was created
             assistant.delete_session(assistant_id=assistant_id, session_id=session_id)
 
-#thread for listen what user say
-def listening_thread():
-    # global wait_command
-    # global command_text
-
-    # Initialize the recognizer
-    recognizer = sr.Recognizer()
-    with sr.Microphone() as mic:
-        recognizer.adjust_for_ambient_noise(mic)
-        while(True):
-                print("Listening...")
-
-                audio_data = recognizer.listen(mic, timeout=10, phrase_time_limit=3)
-
-                # Recognize the speech and save it to a text file
-                try:
-                    # Recognize speech using Google Speech-to-Text
-                    recognized_text = recognizer.recognize_google(audio_data)
-                    print("You said:", recognized_text)
-
-                    #key word detection
-                    keywords = {"stop", "continue", "quit", "name"}
-                    detected_keywords = [kw for kw in keywords if kw in recognized_text.lower()]
-                    if detected_keywords:
-                        print("keyword detected")
-
-                    if detected_keywords or ibm_Chatbot.wait_command:
-                        with threading_lock:
-                            ibm_Chatbot.command_text = recognized_text
-                            ibm_Chatbot.wait_command = False
-
-                except sr.UnknownValueError:
-                    print("Could not understand the audio.")
-                except sr.RequestError as e:
-                    print(f"Error with the speech recognition service; {e}")
-
 def audio_thread(audio_queue):
     recognizer = sr.Recognizer()
     mic = sr.Microphone()
@@ -409,55 +371,51 @@ def audio_thread(audio_queue):
         print("Ready to receive audio...")
         while True:
             try:
-                if ibm_Chatbot.is_speaking == True:
-                    print("start sleeping----------------")
-                    time.sleep(3)
-                    #clean_queue(audio_queue)
-                    ibm_Chatbot.is_speaking = False
-                audio = recognizer.listen(source, timeout=70.0, phrase_time_limit=3.0)
-                audio_queue.put(audio)
+                if ibm_Chatbot.wait_command:
+                    time.sleep(4)
+                    print("start listening")
+                    audio = recognizer.listen(source, timeout=4.0, phrase_time_limit=4.0)
+                    print("end listening")
+                    #audio_queue.put(audio)
+                    recognized_text = recognizer.recognize_google(audio)
+                    print("You said:", recognized_text)
+                    keywords = {"stop", "continue", "quit", "name"}
+                    detected_keywords = [kw for kw in keywords if kw in recognized_text.lower()]
+                    if detected_keywords:
+                        print("keyword detected")
+                    ibm_Chatbot.command_text = recognized_text
+                    ibm_Chatbot.wait_command = False
+                    print("end recog")
             except Exception as e:
                 print(f"Error capturing audio: {e}")
-                
-                
+
 def recognize_thread(audio_queue):
     recognizer = sr.Recognizer()
     while True:
         if not audio_queue.empty():
-            print("Queue length:", audio_queue.qsize())
-
+            print(audio_queue.qsize())
             audio = audio_queue.get()
-            #clean_queue(audio_queue)
             try:
-                # raw_data = audio.get_wav_data()
-                # np_data = np.frombuffer(raw_data, dtype=np.int16)
-                # clean_data = reduce_noise(np_data)
+                # Convert SpeechRecognition audio data to NumPy array for processing
+                # Process cleaned audio...
                 recognized_text = recognizer.recognize_google(audio)
                 print("You said:", recognized_text)
-                
                 keywords = {"stop", "continue", "quit", "name"}
                 detected_keywords = [kw for kw in keywords if kw in recognized_text.lower()]
                 if detected_keywords:
                     print("keyword detected")
-                
-                if detected_keywords or ibm_Chatbot.wait_command:
-                    with threading_lock:
-                        ibm_Chatbot.command_text = recognized_text
-                        ibm_Chatbot.wait_command = False
-                    print(ibm_Chatbot.wait_command)
             except sr.UnknownValueError:
                 print("Google Speech Recognition could not understand audio")
             except sr.RequestError as e:
                 print(f"Could not request results from Google Speech Recognition service; {e}")
 
 #thread for controlling speaker
-def speaking_thread(audio_queue):    
+def speaking_thread():    
     while True:
         if ibm_Chatbot.mode == "0":
             pass
         elif ibm_Chatbot.mode == "1":
             read_text(ibm_Chatbot.topic)
-            clean_queue(audio_queue)
         elif ibm_Chatbot.mode == "2.1":
             ibm_Chatbot.history = read_history_from_json(history_file)
             episode_to_resume = list_history(ibm_Chatbot.history)
@@ -474,10 +432,9 @@ def speaking_thread(audio_queue):
 def main():
     audio_queue = queue.Queue()
     threading.Thread(target=chatbot_thread).start()
-    #threading.Thread(target=listening_thread).start()
     threading.Thread(target=audio_thread, args=(audio_queue,), daemon=True).start()
-    threading.Thread(target=recognize_thread, args=(audio_queue,), daemon=True).start()
-    threading.Thread(target=speaking_thread, args=(audio_queue,), daemon=False).start()
+    # threading.Thread(target=recognize_thread, args=(audio_queue,), daemon=True).start()
+    threading.Thread(target=speaking_thread).start()
 
 if __name__ == "__main__":
     main()
