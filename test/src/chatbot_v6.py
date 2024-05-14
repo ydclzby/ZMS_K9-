@@ -40,24 +40,23 @@ class PodcastPlayer(object):
     def __init__(self, history_fp):
         self.history_fp = history_fp
         self.player = None
-        self.save_history = None
         self.current_start_time = None
         self.paused_arg = False
         self.quit_arg = False
-        self.read_history = None
+        self.history_data = {}
         self.control_command = None
     
     def read_podcast_history(self):
         try:
             with open(self.history_fp, "r") as file:
-                self.read_history = json.load(file)
+                self.history_data = json.load(file)
         except FileNotFoundError:
             print(f"No history file found at {self.history_fp}.")
-            self.read_history = None
+            self.history_data = None
     
     def save_padcast_history(self):
         with open(self.history_fp, "w") as file:
-            json.dump(self.save_history, file, indent=4)  # Save only a single episode
+            json.dump(self.history_data, file, indent=4)  # Save only a single episode
         print(f"Playback history saved to {self.history_fp}")
         
     def first_podcast(self, topic):
@@ -101,7 +100,7 @@ class PodcastPlayer(object):
                         "url": first_episode_url,
                         "duration_listened": 0  # Initialize with zero; updated when stopping
                     }
-                    self.save_history = history_entry  # Replace existing entries with the new one
+                    self.history_data = history_entry  # Replace existing entries with the new one
                     self.control_playback()
         else:
             print(f"Error fetching data: {response.status_code}")
@@ -116,7 +115,7 @@ class PodcastPlayer(object):
                     self.paused_arg = True
                     if self.current_start_time is not None:
                         elapsed_time = time.time() - self.current_start_time
-                        self.save_history["duration_listened"] += elapsed_time
+                        self.history_data["duration_listened"] += elapsed_time
                 elif command == "resume" and self.player and self.paused_arg:
                     print("Resuming playback...")
                     self.player.play()
@@ -130,7 +129,7 @@ class PodcastPlayer(object):
                     # Update the final duration listened
                     if self.current_start_time is not None:
                         elapsed_time = time.time() - self.current_start_time
-                        self.save_history["duration_listened"] += elapsed_time
+                        self.history_data["duration_listened"] += elapsed_time
                     self.save_padcast_history()
                     break
                 else:
@@ -138,12 +137,12 @@ class PodcastPlayer(object):
         
     def play_history(self):
         self.read_podcast_history()
-        if self.read_history:
+        if not self.history_data:
             return
         
-        url = self.read_history["url"]
-        duration_listened = self.read_history["duration_listened"]
-        print(f"Resuming '{self.read_history['title']}' from {duration_listened} seconds...")
+        url = self.history_data["url"]
+        duration_listened = self.history_data["duration_listened"]
+        print(f"Resuming '{self.history_data['title']}' from {duration_listened} seconds...")
         
         instance = vlc.Instance()
         self.player = instance.media_player_new()
@@ -359,7 +358,8 @@ class SysState(object):
                     # raw_data = audio.get_wav_data()
                     # np_data = np.frombuffer(raw_data, dtype=np.int16)
                     # clean_data = reduce_noise(np_data)
-                    recognized_text = recognizer.recognize_google(audio)
+                    # recognized_text = recognizer.recognize_google(audio)
+                    recognized_text = input('use:')
                     print("You said:", recognized_text)
                     
                     keywords = {"stop", "continue", "quit", "name"}
