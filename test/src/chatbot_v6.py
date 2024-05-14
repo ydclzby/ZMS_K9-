@@ -15,7 +15,6 @@ import json
 import queue
 from gtts import gTTS
 from datetime import datetime
-import noisereduce as nr
 import numpy as np
 
 
@@ -286,16 +285,21 @@ class SysState(object):
                     # Print the chatbot's response
                     if response['output']['generic']:
                         self.response = response['output']['generic'][0]['text']
+                        response_label = response['output']['generic'][-1]['text'][1]
+                        response_content = ""
+                        for message in response['output']['generic']:
+                            response_content += message['text'][5:]
+
                         #print("Assistant:", response['output']['generic'][0]['text'])
-                        if self.response[1] == '0': #unknown commands
+                        if response_label == '0': #unknown commands
                             print("unknown command")
-                        elif self.response[1] == '1': #plain text
-                            print(self.response[5:])
+                        elif response_label == '1': #plain text
+                            print(response_content)
                             with threading_lock:
                                 self.mode = "1"
-                                self.topic = self.response[5:]
-                        elif self.response[1] == '2': #podcast
-                            if self.response[5:] == "continue_podcast":
+                                self.topic = response_content
+                        elif response_label == '2': #podcast
+                            if response_content == "continue_podcast":
                                 print("continue_podcast")
                                 with threading_lock:
                                     self.mode = "2.1"
@@ -303,18 +307,18 @@ class SysState(object):
                                 print("new_podcast")
                                 with threading_lock:
                                     self.mode = "2.2"
-                                    self.topic = self.response[5:]
-                        elif self.response[1] == '3': #news
+                                    self.topic = response_content
+                        elif response_label == '3': #news
                             with threading_lock:
                                 self.mode = "3"
-                                self.topic = self.response[5:]
-                        elif self.response[1] == '4': #music
+                                self.topic = response_content
+                        elif response_label == '4': #music
                             pass
-                        elif self.response[1] == '5': #control
+                        elif response_label == '5': #control
                             print("control command")
-                            print(self.response[5:])
+                            print(response_content)
                             with threading_lock:
-                                self.control_command = self.response[5:]
+                                self.control_command = response_content
                                 self.podcastPlayer.update_control_command(self.control_command)
                                 self.newsPlayer.update_control_command(self.control_command)
                         
@@ -340,7 +344,7 @@ class SysState(object):
             print("Ready to receive audio...")
             while True:
                 try:
-                    audio = recognizer.listen(source, timeout=5.0, phrase_time_limit=5.0)
+                    audio = recognizer.listen(source, timeout=30.0, phrase_time_limit=5.0)
                     self.audio_queue.put(audio)
                 except Exception as e:
                     print(f"Error capturing audio: {e}")
