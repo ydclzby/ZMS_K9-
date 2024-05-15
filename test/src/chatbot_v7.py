@@ -29,6 +29,7 @@ news_endpoint = "https://content.guardianapis.com/search"
 
 threading_lock = threading.Lock()
 podcast_lock = threading.Lock()
+music_lock = threading.Lock()
 
 podcast_history_fp = "../data/history/playback_history.json"
 
@@ -119,11 +120,13 @@ class PodcastPlayer(object):
                     if self.current_start_time is not None:
                         elapsed_time = time.time() - self.current_start_time
                         self.history_data["duration_listened"] += elapsed_time
+                    self.control_command = None
                 elif command == "resume" and self.player and self.paused_arg:
                     print("Resuming playback...")
                     self.player.play()
                     self.paused_arg = False
                     self.current_start_time = time.time()
+                    self.control_command = None
                 elif command == "quit":
                     print("Quitting playback and updating history...")
                     self.quit_arg = True
@@ -134,6 +137,7 @@ class PodcastPlayer(object):
                         elapsed_time = time.time() - self.current_start_time
                         self.history_data["duration_listened"] += elapsed_time
                     self.save_padcast_history()
+                    self.control_command = None
                     break
                 else:
                     pass
@@ -237,6 +241,7 @@ class NewsPlayer(object):
                             quit = True
                             self.player.stop()
                             self.player = None
+                            self.control_command = None
                             break
                     os.remove(tts_file)
         else:
@@ -294,11 +299,41 @@ class MusicPlayer(object):
                 self.player.audio_set_volume(100)
                 print("Streaming music")
                 self.player.play()
+                self.control_playback()
+
             else:
-                return "No jazz tracks found.", None, None
+                return "No suitable tracks found.", None, None
         except requests.RequestException as e:
-            return f"An error occurred: {str(e)}", None, None 
-        
+            return f"An error occurred: {str(e)}", None, None
+
+    def control_playback(self):
+        while True:
+            command = self.control_command
+            with music_lock:
+                if command == "stop" and self.player and not self.paused_arg:
+                    print("Pausing the song...")
+                    self.player.pause()
+                    self.paused_arg = True
+                    self.control_command = None
+
+                elif command == "resume" and self.player and self.paused_arg:
+                    print("Resuming playback...")
+                    self.player.play()
+                    self.paused_arg = False
+                    self.control_command = None
+
+                elif command == "quit":
+                    print("Quitting the song...")
+                    self.quit_arg = True
+                    if self.player:
+                        self.player.stop()
+                    self.control_command = None
+                    break
+                else:
+                    pass 
+    
+    def update_control_command(self, new_command):
+        self.control_command = new_command
         
 
 # SysState Class
@@ -395,6 +430,7 @@ class SysState(object):
                                 self.control_command = response_content
                                 self.podcastPlayer.update_control_command(self.control_command)
                                 self.newsPlayer.update_control_command(self.control_command)
+                                self.musicPlayer.update_control_command(self.control_command)
                         elif response_label == '6':
                             self.mic = True
                             print(response_content)
