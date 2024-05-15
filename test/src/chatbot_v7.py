@@ -367,6 +367,11 @@ class SysState(object):
 
             while True:
                 if(self.wait_command == False):
+
+                    self.podcastPlayer.update_control_command(None)
+                    self.newsPlayer.update_control_command(None)
+                    self.musicPlayer.update_control_command(None)
+                    
                     print("------------------")
                     print("user input is:", self.command_text)
                     # Send a message to the chatbot
