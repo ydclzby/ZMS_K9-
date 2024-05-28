@@ -17,7 +17,6 @@ from gtts import gTTS
 from datetime import datetime
 import numpy as np
 
-
 # api settings
 itunes_search_url = "https://itunes.apple.com/search"
 
@@ -30,6 +29,7 @@ news_endpoint = "https://content.guardianapis.com/search"
 
 threading_lock = threading.Lock()
 podcast_lock = threading.Lock()
+music_lock = threading.Lock()
 
 podcast_history_fp = "../data/history/playback_history.json"
 
@@ -120,11 +120,13 @@ class PodcastPlayer(object):
                     if self.current_start_time is not None:
                         elapsed_time = time.time() - self.current_start_time
                         self.history_data["duration_listened"] += elapsed_time
+                    self.control_command = None
                 elif command == "resume" and self.player and self.paused_arg:
                     print("Resuming playback...")
                     self.player.play()
                     self.paused_arg = False
                     self.current_start_time = time.time()
+                    self.control_command = None
                 elif command == "quit":
                     print("Quitting playback and updating history...")
                     self.quit_arg = True
@@ -135,6 +137,7 @@ class PodcastPlayer(object):
                         elapsed_time = time.time() - self.current_start_time
                         self.history_data["duration_listened"] += elapsed_time
                     self.save_padcast_history()
+                    self.control_command = None
                     break
                 else:
                     pass
@@ -171,9 +174,11 @@ class PodcastPlayer(object):
 class NewsPlayer(object):
     def __init__(self):
         self.control_command = None
+        self.player = None
           
     def get_news(self, topic):
         #get news url
+        quit = False
         params = {
             'api-key': news_api_key,
             'q': topic,  # Search term, can be customized
@@ -214,15 +219,31 @@ class NewsPlayer(object):
             # Display the headline
             if headline:
                 print(f"Headline: {headline.get_text()}")
-
+            player = vlc.MediaPlayer()
             # Display the content of the article
             for p in paragraphs:
-                with open("../data/news_content.txt", 'a') as file:
-                    file.write('\n' + p.get_text())
-                print(p.get_text())
-                if self.control_command == "stop" or self.control_command == "quit":
-                    break
-                self.read_text(p.get_text())
+                if not quit:
+                    with open("../data/news_content.txt", 'a') as file:
+                        file.write('\n' + p.get_text())
+                    print(p.get_text())
+                    tts = gTTS(text=p.get_text(), lang='en')
+                    tts_file = "temp_speech.mp3"
+                    tts.save(tts_file)
+                    self.player = None
+                    media = vlc.Media(tts_file)
+                    instance = vlc.Instance()
+                    self.player = instance.media_player_new()
+                    self.player.set_media(media)
+                    self.player.play()
+                    
+                    while self.player.is_playing():
+                        if self.control_command == "quit":
+                            quit = True
+                            self.player.stop()
+                            self.player = None
+                            self.control_command = None
+                            break
+                    os.remove(tts_file)
         else:
             print('Failed to fetch the article content. Status Code:', response.status_code)
 
@@ -278,11 +299,41 @@ class MusicPlayer(object):
                 self.player.audio_set_volume(100)
                 print("Streaming music")
                 self.player.play()
+                self.control_playback()
+
             else:
-                return "No jazz tracks found.", None, None
+                return "No suitable tracks found.", None, None
         except requests.RequestException as e:
-            return f"An error occurred: {str(e)}", None, None 
-        
+            return f"An error occurred: {str(e)}", None, None
+
+    def control_playback(self):
+        while True:
+            command = self.control_command
+            with music_lock:
+                if command == "stop" and self.player and not self.paused_arg:
+                    print("Pausing the song...")
+                    self.player.pause()
+                    self.paused_arg = True
+                    self.control_command = None
+
+                elif command == "resume" and self.player and self.paused_arg:
+                    print("Resuming playback...")
+                    self.player.play()
+                    self.paused_arg = False
+                    self.control_command = None
+
+                elif command == "quit":
+                    print("Quitting the song...")
+                    self.quit_arg = True
+                    if self.player:
+                        self.player.stop()
+                    self.control_command = None
+                    break
+                else:
+                    pass 
+    
+    def update_control_command(self, new_command):
+        self.control_command = new_command
         
 
 # SysState Class
@@ -316,6 +367,11 @@ class SysState(object):
 
             while True:
                 if(self.wait_command == False):
+
+                    self.podcastPlayer.update_control_command(None)
+                    self.newsPlayer.update_control_command(None)
+                    self.musicPlayer.update_control_command(None)
+                    
                     print("------------------")
                     print("user input is:", self.command_text)
                     # Send a message to the chatbot
@@ -379,6 +435,7 @@ class SysState(object):
                                 self.control_command = response_content
                                 self.podcastPlayer.update_control_command(self.control_command)
                                 self.newsPlayer.update_control_command(self.control_command)
+                                self.musicPlayer.update_control_command(self.control_command)
                         elif response_label == '6':
                             self.mic = True
                             print(response_content)
@@ -400,18 +457,18 @@ class SysState(object):
                 assistant.delete_session(assistant_id=assistant_id, session_id=session_id)
         
     def audio_thread(self):
-        recognizer = sr.Recognizer()
-        mic = sr.Microphone()
-        with mic as source:
-            recognizer.adjust_for_ambient_noise(source)
-            print("Ready to receive audio...")
-            while True:
-                try:
-                    if self.mic == False:
-                        continue
-                    else:
+        while True:
+            if self.mic == False:
+                continue
+            else:
+                recognizer = sr.Recognizer()
+                mic = sr.Microphone()
+                with mic as source:
+                    recognizer.adjust_for_ambient_noise(source)
+                    print("Ready to receive audio...")
+                    try:
                         print('mic on')
-                        audio = recognizer.listen(source, timeout=5.0, phrase_time_limit=5.0)
+                        audio = recognizer.listen(source, timeout=5.0, phrase_time_limit=3.0)
                         
                         recognized_text = recognizer.recognize_google(audio)
                         print("You said:", recognized_text)
@@ -424,8 +481,8 @@ class SysState(object):
                         self.wait_command = False
                         self.mic = False
                         print('mic off')
-                except Exception as e:
-                    print(f"Error capturing audio: {e}")
+                    except Exception as e:
+                        print(f"Error capturing audio: {e}")
 
     def recognize_thread(self):
         recognizer = sr.Recognizer()
