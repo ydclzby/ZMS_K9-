@@ -20,9 +20,9 @@ import numpy as np
 # api settings
 itunes_search_url = "https://itunes.apple.com/search"
 
-api_key = "pi8pPj2tKQ21SjXaWZhRH5QJHemD1VUh9OCNk4_mxZll"
-service_url = "https://api.us-south.assistant.watson.cloud.ibm.com/instances/331ce7d9-5f6f-4f18-ae44-6418b93a1753"
-assistant_id = "7d57aa96-2f2f-472a-8427-85181a6f5768"
+api_key = "c5fMtKdU7iDNdzmB0vIv9_t88rPExGfffuMxNCpqBQ1L"
+service_url = "https://api.eu-gb.assistant.watson.cloud.ibm.com/instances/e5a41b2f-bd77-4e71-b02c-430b71625717"
+assistant_id = "62222580-6d55-4e58-889f-515789eb2cd1"
 
 news_api_key = "a0ff4132-cf60-48d7-b23f-d0523e7c67aa"
 news_endpoint = "https://content.guardianapis.com/search"
@@ -49,6 +49,7 @@ class PodcastPlayer(object):
         self.quit_arg = False
         self.history_data = {}
         self.control_command = None
+        self.found = True
     
     def read_podcast_history(self):
         try:
@@ -64,6 +65,7 @@ class PodcastPlayer(object):
         print(f"Playback history saved to {self.history_fp}")
         
     def first_podcast(self, topic):
+        
         params = {
             "term": topic,
             "media": "podcast",
@@ -73,6 +75,7 @@ class PodcastPlayer(object):
         response = requests.get(itunes_search_url, params=params)
         
         if response.status_code == 200:
+            
             data = response.json()
             results = data.get("results", [])
 
@@ -83,6 +86,7 @@ class PodcastPlayer(object):
                 feed = feedparser.parse(feed_url)
 
                 if feed.entries:
+                    
                     first_episode_url = feed.entries[0].enclosures[0].href
                     episode_title = feed.entries[0].title
                     print(f"First Episode Title: {episode_title}")
@@ -106,6 +110,8 @@ class PodcastPlayer(object):
                     }
                     self.history_data = history_entry  # Replace existing entries with the new one
                     self.control_playback()
+            else:
+                self.found = False
         else:
             print(f"Error fetching data: {response.status_code}")
     
@@ -175,6 +181,7 @@ class NewsPlayer(object):
     def __init__(self):
         self.control_command = None
         self.player = None
+        self.found = True
           
     def get_news(self, topic):
         #get news url
@@ -270,6 +277,7 @@ class MusicPlayer(object):
         self.player = None
         self.paused_arg = False
         self.quit_arg = False
+        self.found = True
         
     def get_song(self, topic):
         params = {
@@ -300,9 +308,9 @@ class MusicPlayer(object):
                 print("Streaming music")
                 self.player.play()
                 self.control_playback()
-
             else:
-                return "No suitable tracks found.", None, None
+                self.found = False
+                
         except requests.RequestException as e:
             return f"An error occurred: {str(e)}", None, None
 
@@ -366,15 +374,19 @@ class SysState(object):
             session_id = response['session_id']
 
             while True:
-                if(self.wait_command == False):
+                if(self.podcastPlayer.found == False or self.musicPlayer.found == False):
+                    self.command_text = 'not found'
+                    
+                if(self.wait_command == False or self.podcastPlayer.found == False or self.musicPlayer.found == False):
 
                     self.podcastPlayer.update_control_command(None)
                     self.newsPlayer.update_control_command(None)
                     self.musicPlayer.update_control_command(None)
                     
-                    print("------------------")
+                    print("-----------------------------------------------")
                     print("user input is:", self.command_text)
                     # Send a message to the chatbot
+                    print(self.podcastPlayer.found)
                     message_input = {
                         'message_type': 'text',
                         'text': self.command_text
@@ -405,13 +417,9 @@ class SysState(object):
                         elif response_label == '2': #podcast
                             self.mic = True
                             if response_content == "continue_podcast":
-                                print("continue_podcast")
-                                
                                 with threading_lock:
                                     self.mode = "2.1"
-                                print('out of lock')
                             else:
-                                
                                 print("new_podcast")
                                 with threading_lock:
                                     self.mode = "2.2"
@@ -444,6 +452,8 @@ class SysState(object):
                             print('out of lock')
                         with threading_lock:
                             self.wait_command = True
+                            self.podcastPlayer.found = True
+                            self.musicPlayer.found = True
                     else:
                         print("Assistant: No response generated.")
 
@@ -483,35 +493,6 @@ class SysState(object):
                         print('mic off')
                     except Exception as e:
                         print(f"Error capturing audio: {e}")
-
-    def recognize_thread(self):
-        recognizer = sr.Recognizer()
-        while True:
-            if not self.audio_queue.empty():
-                audio = self.audio_queue.get()
-
-                try:
-                    # raw_data = audio.get_wav_data()
-                    # np_data = np.frombuffer(raw_data, dtype=np.int16)
-                    # clean_data = reduce_noise(np_data)
-                    # recognized_text = recognizer.recognize_google(audio)
-                    recognized_text = input('use:')
-                    print("You said:", recognized_text)
-                    
-                    keywords = {"stop", "continue", "quit", "name"}
-                    detected_keywords = [kw for kw in keywords if kw in recognized_text.lower()]
-                    if detected_keywords:
-                        print("keyword detected")
-                    
-                    if detected_keywords or self.wait_command:
-                        with threading_lock:
-                            self.command_text = recognized_text
-                            self.wait_command = False
-                        print(self.wait_command)
-                except sr.UnknownValueError:
-                    print("Google Speech Recognition could not understand audio")
-                except sr.RequestError as e:
-                    print(f"Could not request results from Google Speech Recognition service; {e}")
 
     def mode_thread(self):    
         while True:
